@@ -1,0 +1,48 @@
+func_test_Parent_new:
+MOV self $test_Parent_new_arg1
+MOV a $test_Parent_new_arg2
+MOV $imm_0 0
+MOV $tmp_1 self
+ADD $tmp_1 $imm_0
+MOV $imm_1 1
+OUT $tmp_1 $imm_1
+RET
+func_test_Child_new:
+MOV self $test_Child_new_arg1
+MOV a $test_Child_new_arg2
+MOV b $test_Child_new_arg3
+MOV $test_Parent_new_arg1 self
+PUSH0 $test_Parent_new_arg1
+MOV $test_Parent_new_arg2 a
+POP0 $test_Parent_new_arg1
+CALL func_test_Parent_new
+MOV $imm_1 1
+MOV $tmp_3 self
+ADD $tmp_3 $imm_1
+OUT $tmp_3 b
+RET
+func_main:
+MOV $malloc_arg1 2
+INT native_malloc
+MOV a $malloc_return
+MOV $test_Child_new_arg1 a
+PUSH0 $test_Child_new_arg1
+MOV $test_Child_new_arg2 1
+PUSH0 $test_Child_new_arg2
+MOV $test_Child_new_arg3 2
+POP0 $test_Child_new_arg2
+POP0 $test_Child_new_arg1
+CALL func_test_Child_new
+MOV $imm_0 0
+MOV $tmp_5 a
+ADD $tmp_5 $imm_0
+IN $tmp_6 $tmp_5
+MOV $puts_arg1 $tmp_6
+INT native_puts
+MOV $imm_1 1
+MOV $tmp_7 a
+ADD $tmp_7 $imm_1
+IN $tmp_8 $tmp_7
+MOV $puts_arg1 $tmp_8
+INT native_puts
+RET

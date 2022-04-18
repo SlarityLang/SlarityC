@@ -1,0 +1,6 @@
+MODULE test.Child
+CLASS Child
+SIZE 1
+FIELD b 0 -
+METHOD new  test_Child_new
+EXTEND Parent

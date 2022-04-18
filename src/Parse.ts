@@ -13,6 +13,12 @@ import {
   Variable,
   WhileLoop,
 } from "./AST";
+import { parseClass } from "./ClassSummary";
+import {
+  CompileContext,
+  transformFullFunctionCallName,
+  transformFullFunctionDefName,
+} from "./Context";
 // Find the next pair of l
 function findNextPair(seq: any[], l: string, r: string): number {
   let i = 0;
@@ -35,40 +41,49 @@ function findNextPair(seq: any[], l: string, r: string): number {
   return -1;
 }
 
-export function handleEvaluable(eva: [string, string][]): Evaluable | null {
+export function handleEvaluable(
+  eva: [string, string][],
+  ctx: CompileContext
+): Evaluable | null {
   // Like (3 + 5) + sum(1 + 2, 8 / 4) * 7
   // Create all references
   while (handleImmediateValue(eva)) {}
-  while (handleVariable(eva)) {}
+  while (handleVariable(eva, ctx)) {}
   // First pick all function calls
   // Identifier, Left Bracket, *, Right Bracket
-  while (findFunctionCall(eva)) {}
+  while (findFunctionCall(eva, ctx)) {}
   // Lookup for brackets
-  while (handleBracket(eva)) {}
+  while (handleBracket(eva, ctx)) {}
   // Now that all have been cleared: Eva + Fun * 7
-  // Let's pick, first from NOT
-  while (handleNot(eva)) {}
+  // Let's pick, first from Dereference
+  while (handleDereference(eva, ctx)) {}
+  // Now DOT
+  while (handleOperator(eva, Operator.DOT, ctx)) {}
+  // Now NOT
+  while (handleNot(eva, ctx)) {}
   // Now time to +-*/
-  while (handleOperator(eva, Operator.MUL)) {}
-  while (handleOperator(eva, Operator.DIV)) {}
-  while (handleOperator(eva, Operator.ADD)) {}
-  while (handleOperator(eva, Operator.SUB)) {}
+  while (handleOperator(eva, Operator.MUL, ctx)) {}
+  while (handleOperator(eva, Operator.DIV, ctx)) {}
+  while (handleOperator(eva, Operator.ADD, ctx)) {}
+  while (handleOperator(eva, Operator.SUB, ctx)) {}
   // Compare
-  while (handleOperator(eva, Operator.GTE)) {}
-  while (handleOperator(eva, Operator.LTE)) {}
-  while (handleOperator(eva, Operator.GT)) {}
-  while (handleOperator(eva, Operator.LT)) {}
-  while (handleOperator(eva, Operator.EQ)) {}
+  while (handleOperator(eva, Operator.GTE, ctx)) {}
+  while (handleOperator(eva, Operator.LTE, ctx)) {}
+  while (handleOperator(eva, Operator.GT, ctx)) {}
+  while (handleOperator(eva, Operator.LT, ctx)) {}
+  while (handleOperator(eva, Operator.EQ, ctx)) {}
   // Logics
-  while (handleOperator(eva, Operator.AND)) {}
-  while (handleOperator(eva, Operator.OR)) {}
+  while (handleOperator(eva, Operator.AND, ctx)) {}
+  while (handleOperator(eva, Operator.OR, ctx)) {}
   // Assigns
-  while (handleAssign(eva)) {}
+  while (handleAssign(eva, ctx)) {}
+  // Pointers
+  while (handleOperator(eva, Operator.PTR, ctx)) {}
   // Now there should be only one value left
   return (eva[0] as unknown as Evaluable) || null;
 }
 
-function handleVariable(seq: any[]): boolean {
+function handleVariable(seq: any[], ctx: CompileContext): boolean {
   let cur;
   let i = 0;
   while (
@@ -81,7 +96,7 @@ function handleVariable(seq: any[]): boolean {
     return false;
   }
   let target = seq[i];
-  seq[i] = new Variable(target[0]);
+  seq[i] = new Variable(target[0], ctx);
   return true;
 }
 
@@ -99,7 +114,7 @@ function handleImmediateValue(seq: any[]): boolean {
   return true;
 }
 
-function handleAssign(seq: any[]): boolean {
+function handleAssign(seq: any[], ctx: CompileContext): boolean {
   let cur;
   let i = 0;
   while ((cur = seq[i]) && (cur[1] !== "OPERATOR" || cur[0] !== "=")) {
@@ -112,7 +127,7 @@ function handleAssign(seq: any[]): boolean {
   let vl;
   if (target instanceof Array) {
     if (target[1] === "IDENTIFIER") {
-      vl = new Variable(target[0]);
+      vl = new Variable(target[0], ctx);
     } else if (target[1] === "NUMBERS") {
       vl = new ImmediateValue(parseInt(target[0]));
     }
@@ -123,20 +138,25 @@ function handleAssign(seq: any[]): boolean {
   let vr;
   if (target2 instanceof Array) {
     if (target2[1] === "IDENTIFIER") {
-      vr = new Variable(target2[0]);
+      vr = new Variable(target2[0], ctx);
     } else if (target2[1] === "NUMBERS") {
       vr = new ImmediateValue(parseInt(target2[0]));
     }
   } else {
     vr = target2; // It must be an Evaluable
   }
-  let ev = new AssignOperation(vl, vr);
+  let ev = new AssignOperation(vl, vr, ctx);
+
   seq.splice(i, 2);
   seq[i - 1] = ev;
   return true;
 }
 
-function handleOperator(seq: any[], op: Operator): boolean {
+function handleOperator(
+  seq: any[],
+  op: Operator,
+  ctx: CompileContext
+): boolean {
   let cur;
   let i = 0;
   while ((cur = seq[i]) && (cur[1] !== "OPERATOR" || cur[0] !== op)) {
@@ -149,7 +169,7 @@ function handleOperator(seq: any[], op: Operator): boolean {
   let vl;
   if (target instanceof Array) {
     if (target[1] === "IDENTIFIER") {
-      vl = new Variable(target[0]);
+      vl = new Variable(target[0], ctx);
     } else if (target[1] === "NUMBERS") {
       vl = new ImmediateValue(parseInt(target[0]));
     }
@@ -160,20 +180,20 @@ function handleOperator(seq: any[], op: Operator): boolean {
   let vr;
   if (target2 instanceof Array) {
     if (target2[1] === "IDENTIFIER") {
-      vr = new Variable(target2[0]);
+      vr = new Variable(target2[0], ctx);
     } else if (target2[1] === "NUMBERS") {
       vr = new ImmediateValue(parseInt(target2[0]));
     }
   } else {
     vr = target2; // It must be an Evaluable
   }
-  let ev = new BiVarCalculation(vl, vr, op);
+  let ev = new BiVarCalculation(vl, vr, op, ctx);
   seq.splice(i, 2);
   seq[i - 1] = ev;
   return true;
 }
 
-function handleNot(seq: any[]): boolean {
+function handleNot(seq: any[], ctx: CompileContext): boolean {
   let cur;
   let i = 0;
   while ((cur = seq[i]) && cur[1] !== "NOT") {
@@ -186,20 +206,46 @@ function handleNot(seq: any[]): boolean {
   let va;
   if (notTarget instanceof Array) {
     if (notTarget[1] === "IDENTIFIER") {
-      va = new Variable(notTarget[0]);
+      va = new Variable(notTarget[0], ctx);
     } else if (notTarget[1] === "NUMBERS") {
       va = new ImmediateValue(parseInt(notTarget[1]));
     }
   } else {
     va = notTarget; // It must be an Evaluable
   }
-  let ev = new BiVarCalculation(va, new NullValue(), Operator.NOT);
+  let ev = new BiVarCalculation(va, new NullValue(), Operator.NOT, ctx);
   seq.splice(i + 1, 1);
   seq[i] = ev;
   return true;
 }
 
-function handleBracket(seq: any[]): boolean {
+function handleDereference(seq: any[], ctx: CompileContext): boolean {
+  let cur;
+  let i = 0;
+  while ((cur = seq[i]) && cur[1] !== "AT") {
+    i++;
+  }
+  if (cur === undefined) {
+    return false;
+  }
+  let atTarget = seq[i + 1];
+  let va;
+  if (atTarget instanceof Array) {
+    if (atTarget[1] === "IDENTIFIER") {
+      va = new Variable(atTarget[0], ctx);
+    } else if (atTarget[1] === "NUMBERS") {
+      va = new ImmediateValue(parseInt(atTarget[1]));
+    }
+  } else {
+    va = atTarget; // It must be an Evaluable
+  }
+  let ev = new BiVarCalculation(va, new NullValue(), Operator.AT, ctx);
+  seq.splice(i + 1, 1);
+  seq[i] = ev;
+  return true;
+}
+
+function handleBracket(seq: any[], ctx: CompileContext): boolean {
   let i = 0;
   let cur;
   while ((cur = seq[i]) && cur[1] !== "LEFT_BRACKET") {
@@ -215,7 +261,7 @@ function handleBracket(seq: any[]): boolean {
   }
   let brak = seq.concat().splice(i + 1, pair + 1); // Leave the first to replace
   brak.pop(); // Remove the last
-  let ev = handleEvaluable(brak);
+  let ev = handleEvaluable(brak, ctx);
   if (!ev) {
     return false;
   }
@@ -226,12 +272,11 @@ function handleBracket(seq: any[]): boolean {
 
 const KEYWORDS = ["if", "while"];
 
-function findFunctionCall(seq: any[]): boolean {
+function findFunctionCall(seq: any[], ctx: CompileContext): boolean {
   // This function will modify the original array and put a FunctionCall to replace the token sequence
   let i = 0;
   let cur;
   let identifier = "";
-  let pair = -1;
   while (true) {
     while (
       (cur = seq[i]) &&
@@ -251,7 +296,7 @@ function findFunctionCall(seq: any[]): boolean {
       if (pair !== -1) {
         let funcCallSeq = seq.concat().splice(i + 1, pair + 2); // Leave the first to replace
         funcCallSeq.unshift([identifier, "IDENTIFIER"]);
-        let fun = extractFunctionCall(funcCallSeq);
+        let fun = extractFunctionCall(funcCallSeq, ctx);
         if (!fun) {
           continue;
         }
@@ -262,7 +307,10 @@ function findFunctionCall(seq: any[]): boolean {
     }
   }
 }
-function extractFunctionCall(restSeq: [string, string][]): FunctionCall | null {
+function extractFunctionCall(
+  restSeq: [string, string][],
+  ctx: CompileContext
+): FunctionCall | null {
   if (restSeq[0][1] !== "IDENTIFIER") {
     return null;
   }
@@ -308,24 +356,28 @@ function extractFunctionCall(restSeq: [string, string][]): FunctionCall | null {
     args.push(buf);
   }
   let evas: (Evaluable | null)[] = args.map((a) => {
-    return handleEvaluable(a);
+    return handleEvaluable(a, ctx);
   });
+
   return new FunctionCall(
-    identifier,
+    parseClass(transformFullFunctionCallName(identifier, ctx))[0],
     // @ts-ignore
     evas
   );
 }
 
-export function handleBlockCode(seq: any[]): CodeBlock | null {
-  while (handleFunctionDefine(seq)) {}
-  while (handleIfStatement(seq)) {}
-  while (handleWhileStatement(seq)) {}
+export function handleBlockCode(
+  seq: any[],
+  ctx: CompileContext
+): CodeBlock | null {
+  while (handleFunctionDefine(seq, ctx)) {}
+  while (handleIfStatement(seq, ctx)) {}
+  while (handleWhileStatement(seq, ctx)) {}
   let buf: [string, string][] = [];
   let out = [];
   for (let s of seq) {
     if (s[1] === "EOL") {
-      let e = handleEvaluable(buf);
+      let e = handleEvaluable(buf, ctx);
       buf = [];
       out.push(e);
     } else if (
@@ -333,7 +385,7 @@ export function handleBlockCode(seq: any[]): CodeBlock | null {
       s instanceof WhileLoop ||
       s instanceof FunctionDefineStatement
     ) {
-      let e = handleEvaluable(buf);
+      let e = handleEvaluable(buf, ctx);
       buf = [];
       out.push(e);
       out.push(s);
@@ -342,14 +394,14 @@ export function handleBlockCode(seq: any[]): CodeBlock | null {
     }
   }
   if (buf.length > 0) {
-    let e = handleEvaluable(buf);
+    let e = handleEvaluable(buf, ctx);
     buf = [];
     out.push(e);
   }
   return new CodeBlock(out);
 }
 
-export function handleIfStatement(seq: any[]): boolean {
+export function handleIfStatement(seq: any[], ctx: CompileContext): boolean {
   let i = 0;
   let cur;
   while (true) {
@@ -398,10 +450,10 @@ export function handleIfStatement(seq: any[]): boolean {
         }
       }
       let body = seq.concat().splice(i + 4 + conditionPair, bodyEnd);
-      let bodyCode = handleBlockCode(body);
-      let condition = handleEvaluable(cond);
+      let bodyCode = handleBlockCode(body, ctx);
+      let condition = handleEvaluable(cond, ctx);
 
-      let elseBodyCode = hasElse ? handleBlockCode(elseBody) : null;
+      let elseBodyCode = hasElse ? handleBlockCode(elseBody, ctx) : null;
       if (bodyCode === null || condition === null) {
         continue;
       }
@@ -430,7 +482,7 @@ function shiftEOL(seq: any[]): number {
   return i;
 }
 
-export function handleWhileStatement(seq: any[]): boolean {
+export function handleWhileStatement(seq: any[], ctx: CompileContext): boolean {
   let i = 0;
   let cur;
   while (true) {
@@ -459,8 +511,8 @@ export function handleWhileStatement(seq: any[]): boolean {
         return false;
       }
       let body = seq.concat().splice(i + 4 + conditionPair, bodyEnd);
-      let bodyCode = handleBlockCode(body);
-      let condition = handleEvaluable(cond);
+      let bodyCode = handleBlockCode(body, ctx);
+      let condition = handleEvaluable(cond, ctx);
       if (bodyCode === null || condition === null) {
         continue;
       }
@@ -472,7 +524,7 @@ export function handleWhileStatement(seq: any[]): boolean {
   }
 }
 
-export function handleFunctionDefine(seq: any[]): boolean {
+export function handleFunctionDefine(seq: any[], ctx: CompileContext): boolean {
   let i = 0;
   let cur;
   while (true) {
@@ -505,46 +557,68 @@ export function handleFunctionDefine(seq: any[]): boolean {
         return false;
       }
       let body = seq.concat().splice(i + 4 + argsPair, bodyEnd);
-      while (handleReturnStatement(identifier, body)) {}
-      let bodyCode = handleBlockCode(body);
-      let argsList = a2e(args);
+      // Define function scope
+      let [qid, type] = parseClass(
+        transformFullFunctionDefName(identifier, ctx)
+      );
+      ctx.currentFunction = qid;
+      ctx.functionClassList.set(qid, type || "-");
+      ctx.functionScopeClassList.set(qid, new Map());
+      let argsList = a2e(args, ctx);
+      while (handleReturnStatement(qid, body, ctx)) {}
+      let bodyCode = handleBlockCode(body, ctx);
       if (bodyCode === null) {
         continue;
       }
-      let wh = new FunctionDefineStatement(identifier, argsList, bodyCode);
+      let wh = new FunctionDefineStatement(
+        qid,
+        identifier,
+        argsList,
+        bodyCode,
+        type
+      );
       seq.splice(i + 1, argsPair + bodyEnd + 4);
       seq[i] = wh;
+      ctx.currentFunction = ""; // Undef
       return true;
     }
   }
 }
 
 // Arguments to Evaluables
-function a2e(args: any[]): Variable[] {
+function a2e(args: any[], ctx: CompileContext): Variable[] {
   let o: Variable[] = [];
   let var0: string = "";
   for (let a of args) {
     if (a[1] === "COMMA") {
       if (var0.length > 0) {
-        o.push(new Variable(var0));
+        o.push(new Variable(var0, ctx));
       }
     } else {
       var0 = a[0];
     }
   }
   if (var0.length > 0) {
-    o.push(new Variable(var0));
+    o.push(new Variable(var0, ctx));
   }
   return o;
 }
 
 // Replace return statement with corresponding AST component
-function handleReturnStatement(fName: string, seq: any[]): boolean {
+function handleReturnStatement(
+  fName: string,
+  seq: any[],
+  ctx: CompileContext
+): boolean {
   let i = 0;
   let cur;
-  while ((cur = seq[i]) && (cur[1] !== "IDENTIFIER" || cur[0] !== "return")) {
+  while (
+    (cur = seq[i]) &&
+    (cur[1] !== "IDENTIFIER" || (cur[0] !== "return" && cur[0] !== "return?"))
+  ) {
     i++;
   } // Find EOL or RIGHT_SECTION_BRACKET
+
   let i2 = i + 1;
   let cur2;
   while (
@@ -561,8 +635,9 @@ function handleReturnStatement(fName: string, seq: any[]): boolean {
     i2--;
     cur2 = seq[i2];
   }
+  let delay = cur[0] === "return?";
   let evas = seq.splice(i + 1, i2 - i - 1);
-  let e = handleEvaluable(evas);
-  seq[i] = new ReturnStatement(fName, e || new ImmediateValue(0));
+  let e = handleEvaluable(evas, ctx);
+  seq[i] = new ReturnStatement(fName, e || new ImmediateValue(0), delay);
   return true;
 }

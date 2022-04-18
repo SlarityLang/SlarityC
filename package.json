@@ -4,6 +4,7 @@
   "author": "Andy-K-Sparklight",
   "license": "GPL-3.0-or-later",
   "private": true,
+  "name": "slarityc",
   "bin": {
     "slarityc": "./dist/SlarityC.js"
   },
@@ -16,6 +17,7 @@
     "i": "yarn global add file:$HOME/SlarityC"
   },
   "dependencies": {
+    "chalk": "4",
     "commander": "^9.1.0"
   }
 }

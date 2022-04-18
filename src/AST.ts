@@ -12,6 +12,15 @@ main() {
 
 */
 
+import {
+  BASE_POINTER,
+  ClassSummary,
+  parseClass,
+  resolveClass,
+} from "./ClassSummary";
+import { CompileContext, transformFullFunctionCallName } from "./Context";
+import { warn } from "./Logger";
+
 export interface CodeGeneratable extends Deletable {
   genASM(codes: string[]): void;
 }
@@ -51,21 +60,26 @@ export class IfStatement implements CodeGeneratable {
 
 export interface Evaluable extends CodeGeneratable {
   getResultVarName(): string; // One Evaluable should tell the compiler where the value stores after eval
+  getClass(ctx: CompileContext): ClassSummary; // The class of it
 }
 
 export class ReturnStatement implements CodeGeneratable {
   retVal: Evaluable;
   functionName: string;
-  constructor(f: string, r: Evaluable) {
+  delay: boolean;
+  constructor(f: string, r: Evaluable, delay = false) {
     this.retVal = r;
     this.functionName = f;
+    this.delay = delay;
   }
   genASM(codes: string[]): void {
     this.retVal.genASM(codes);
     codes.push(
       `MOV $${this.functionName}_return ${this.retVal.getResultVarName()}`
     );
-    codes.push("RET");
+    if (!this.delay) {
+      codes.push("RET");
+    }
   }
   genDelASM(codes: string[]): void {
     this.retVal.genDelASM(codes);
@@ -77,9 +91,19 @@ export class FunctionDefineStatement implements CodeGeneratable {
   functionName: string;
   args: Variable[];
   body: CodeBlock;
-  constructor(fName: string, args: Variable[], body: CodeBlock) {
+  type: string;
+  originName: string;
+  constructor(
+    fName: string,
+    originName: string,
+    args: Variable[],
+    body: CodeBlock,
+    type: string
+  ) {
+    [this.originName] = parseClass(originName);
     this.functionName = fName;
     this.args = args;
+    this.type = type;
     this.body = body;
   }
   genASM(codes: string[]): void {
@@ -154,19 +178,33 @@ export class CodeBlock implements CodeGeneratable {
 export class AssignOperation implements Evaluable {
   left: Variable;
   right: Evaluable;
-  constructor(l: Variable, r: Evaluable) {
+  constructor(l: Variable, r: Evaluable, ctx: CompileContext) {
     this.left = l;
     this.right = r;
+    if (!this.left.explictType) {
+      // If not explictly defined, we should use the right as the left
+      ctx.functionScopeClassList
+        .get(ctx.currentFunction)
+        ?.set(
+          this.left.getResultVarName(),
+          this.right.getClass(ctx).identifier
+        );
+    }
   }
   genASM(codes: string[]): void {
     if (this.right instanceof ImmediateValue) {
-      codes.push(`MOV ${this.left.getResultVarName()} ${this.right.value}`);
+      codes.push(
+        `MOV ${this.left.getResultVarName()} ${this.right.getValue()}`
+      );
     } else {
       this.right.genASM(codes);
       codes.push(
         `MOV ${this.left.getResultVarName()} ${this.right.getResultVarName()}`
       );
     }
+  }
+  getClass(ctx: CompileContext): ClassSummary {
+    return this.right.getClass(ctx);
   }
   genDelASM(codes: string[]): void {
     this.right.genDelASM(codes); // Left is a variable
@@ -188,6 +226,9 @@ export enum Operator {
   AND = "&",
   OR = "|",
   NOT = "!",
+  AT = "@",
+  PTR = "<-",
+  DOT = ".",
 }
 
 export class BiVarCalculation implements Evaluable {
@@ -196,12 +237,50 @@ export class BiVarCalculation implements Evaluable {
   right: Evaluable;
   operator: Operator;
   tmpName: string;
-  constructor(l: Evaluable, r: Evaluable, o: Operator) {
+  context: CompileContext;
+  constructor(l: Evaluable, r: Evaluable, o: Operator, ctx: CompileContext) {
     this.left = l;
     this.right = r;
     this.operator = o;
+    this.context = ctx;
     this.tmpName = `$tmp_${BiVarCalculation.tmpIndex.toString(16)}`;
     BiVarCalculation.tmpIndex++;
+  }
+  getClass(ctx: CompileContext): ClassSummary {
+    if (this.operator === Operator.DOT) {
+      if (this.right instanceof Variable) {
+        let n = this.right.getResultVarName();
+        let field = this.left.getClass(ctx).fields.get(n);
+        if (field === undefined) {
+          warn(
+            `Cannot find field ${n} on type ${
+              this.left.getClass(ctx).identifier
+            }`
+          );
+          return BASE_POINTER;
+        }
+        return resolveClass(field.type, ctx);
+      } else if (this.right instanceof FunctionCall) {
+        let n = this.right.functionName;
+        let method = this.left.getClass(ctx).methods.get(n);
+        if (method === undefined) {
+          warn(
+            `Cannot find field ${n} on type ${
+              this.left.getClass(ctx).identifier
+            }`
+          );
+          return BASE_POINTER;
+        }
+        return resolveClass(method.retType, ctx);
+      } else {
+        warn(
+          `Cannot use a non-variable value as the right value of DOT: ${this.right.getResultVarName()}`
+        );
+        return BASE_POINTER;
+      }
+    } else {
+      return this.right.getClass(ctx);
+    }
   }
   genASM(codes: string[]): void {
     switch (this.operator) {
@@ -237,7 +316,7 @@ export class BiVarCalculation implements Evaluable {
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
-            codes.push(`CMP ${this.tmpName} ${this.right.value}`);
+            codes.push(`CMP ${this.tmpName} ${this.right.getValue()}`);
           } else {
             this.right.genASM(codes);
             codes.push(`CMP ${this.tmpName} ${this.right.getResultVarName()}`);
@@ -260,7 +339,7 @@ export class BiVarCalculation implements Evaluable {
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
-            codes.push(`CMP ${this.tmpName} ${this.right.value}`);
+            codes.push(`CMP ${this.tmpName} ${this.right.getValue()}`);
           } else {
             this.right.genASM(codes);
             codes.push(`CMP ${this.tmpName} ${this.right.getResultVarName()}`);
@@ -283,7 +362,7 @@ export class BiVarCalculation implements Evaluable {
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
-            codes.push(`CMP ${this.tmpName} ${this.right.value}`);
+            codes.push(`CMP ${this.tmpName} ${this.right.getValue()}`);
           } else {
             this.right.genASM(codes);
             codes.push(`CMP ${this.tmpName} ${this.right.getResultVarName()}`);
@@ -306,7 +385,7 @@ export class BiVarCalculation implements Evaluable {
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
-            codes.push(`CMP ${this.tmpName} ${this.right.value}`);
+            codes.push(`CMP ${this.tmpName} ${this.right.getValue()}`);
           } else {
             this.right.genASM(codes);
             codes.push(`CMP ${this.tmpName} ${this.right.getResultVarName()}`);
@@ -329,7 +408,7 @@ export class BiVarCalculation implements Evaluable {
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
-            codes.push(`CMP ${this.tmpName} ${this.right.value}`);
+            codes.push(`CMP ${this.tmpName} ${this.right.getValue()}`);
           } else {
             this.right.genASM(codes);
             codes.push(`CMP ${this.tmpName} ${this.right.getResultVarName()}`);
@@ -361,10 +440,55 @@ export class BiVarCalculation implements Evaluable {
         }
         break;
       case Operator.NOT:
+        this.left.genASM(codes);
+        codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
+        codes.push(`NOT ${this.tmpName}`);
+
+        break;
+      case Operator.AT:
+        this.left.genASM(codes);
+        codes.push(`IN ${this.tmpName} ${this.left.getResultVarName()}`);
+        break;
+      case Operator.PTR:
+        this.left.genASM(codes);
+        this.right.genASM(codes);
+        codes.push(
+          `OUT ${this.left.getResultVarName()} ${this.right.getResultVarName()}`
+        );
+        break;
+      case Operator.DOT:
         {
-          this.left.genASM(codes);
-          codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
-          codes.push(`NOT ${this.tmpName}`);
+          if (this.right instanceof FunctionCall) {
+            let rn = this.right.functionName;
+            let sclz = this.left.getClass(this.context);
+            let method = sclz.methods.get(rn);
+            if (method === undefined) {
+              warn(`Cannot find method ${rn} on type ${sclz.identifier}`);
+            } else {
+              this.left.genASM(codes);
+              let arg0 = [this.left].concat(this.right.args);
+              let fun = new FunctionCall(method.link, arg0);
+              fun.genASM(codes);
+              codes.push(`MOV ${this.tmpName} ${fun.getResultVarName()}`);
+            }
+          } else if (this.right instanceof Variable) {
+            let sclz = this.left.getClass(this.context);
+            let rn = this.right.getResultVarName();
+            let field = sclz.fields.get(rn);
+            if (field === undefined) {
+              warn(`Cannot find field ${rn} on type ${sclz.identifier}`);
+            } else {
+              this.left.genASM(codes);
+              let imm = new ImmediateValue(field.offset);
+              imm.genASM(codes);
+              codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
+              codes.push(`ADD ${this.tmpName} ${imm.getResultVarName()}`);
+            }
+          } else {
+            warn(
+              `Cannot use a non-variable value as the right value of DOT: ${this.right.getResultVarName()}`
+            );
+          }
         }
         break;
     }
@@ -390,9 +514,11 @@ export class NullValue implements Evaluable {
   genDelASM(_codes: string[]): void {
     return;
   }
+  getClass(_ctx: CompileContext): ClassSummary {
+    return BASE_POINTER;
+  }
 }
 
-// TODO: push all vars
 export class FunctionCall implements Evaluable, Deletable {
   functionName: string;
   args: Evaluable[];
@@ -405,13 +531,26 @@ export class FunctionCall implements Evaluable, Deletable {
       this.functionName = this.functionName.slice(1);
     }
   }
+  getClass(ctx: CompileContext): ClassSummary {
+    let func = ctx.functionClassList.get(this.functionName);
+    if (func === undefined) {
+      return BASE_POINTER;
+    } else {
+      return resolveClass(func, ctx);
+    }
+  }
   genASM(codes: string[]): void {
     let argi = 1;
     for (let a of this.args) {
-      a.genASM(codes);
-      codes.push(
-        `MOV $${this.functionName}_arg${argi} ${a.getResultVarName()}`
-      );
+      if (a instanceof ImmediateValue) {
+        codes.push(`MOV $${this.functionName}_arg${argi} ${a.getValue()}`);
+      } else {
+        a.genASM(codes);
+        codes.push(
+          `MOV $${this.functionName}_arg${argi} ${a.getResultVarName()}`
+        );
+      }
+
       codes.push(`PUSH0 $${this.functionName}_arg${argi}`);
       argi++;
     }
@@ -442,8 +581,24 @@ export class FunctionCall implements Evaluable, Deletable {
 
 export class Variable implements Evaluable {
   identifier: string;
-  constructor(id: string) {
-    this.identifier = id;
+  type: string;
+  explictType: boolean;
+  constructor(id: string, ctx: CompileContext) {
+    [this.identifier, this.type] = parseClass(
+      transformFullFunctionCallName(id, ctx)
+    );
+    if (this.type) {
+      ctx.functionScopeClassList
+        .get(ctx.currentFunction) // Assume that it has been created
+        ?.set(this.identifier, this.type);
+      this.explictType = true;
+    } else {
+      this.type =
+        ctx.functionScopeClassList
+          .get(ctx.currentFunction)
+          ?.get(this.identifier) || "-";
+      this.explictType = false;
+    }
   }
   genASM(_codes: string[]): void {
     return;
@@ -453,6 +608,9 @@ export class Variable implements Evaluable {
   }
   getResultVarName(): string {
     return this.identifier;
+  }
+  getClass(ctx: CompileContext): ClassSummary {
+    return resolveClass(this.type, ctx);
   }
 }
 export class ImmediateValue implements Evaluable {
@@ -471,5 +629,8 @@ export class ImmediateValue implements Evaluable {
   }
   genDelASM(codes: string[]): void {
     codes.push(`DEL $imm_${this.value}`);
+  }
+  getClass(_ctx: CompileContext): ClassSummary {
+    return BASE_POINTER;
   }
 }

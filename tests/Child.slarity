@@ -1,0 +1,10 @@
+#use test.Parent
+#module test.Child
+#type class
+Child:Parent() {
+    b
+    new(self:Child, a, b){
+        Parent::new(self, a)
+        self.b <- b
+    }
+}

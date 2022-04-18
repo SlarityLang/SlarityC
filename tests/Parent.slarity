@@ -1,0 +1,8 @@
+#module test.Parent
+#type class
+Parent() {
+    a
+    new(self:Parent, a) {
+        self.a <- 1
+    }
+}

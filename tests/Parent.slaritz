@@ -1,0 +1,5 @@
+MODULE test.Parent
+CLASS Parent
+SIZE 1
+FIELD a 0 -
+METHOD new  test_Parent_new

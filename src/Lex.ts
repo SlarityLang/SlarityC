@@ -1,9 +1,10 @@
 export const TokenType: Record<string, RegExp> = {
   NUMBERS: /[0-9]/,
-  IDENTIFIER: /[0-9A-Za-z_\$\#\%\^\@\!]/,
+  IDENTIFIER: /[0-9A-Za-z_\$\%\^\!\?\:\#]/,
   LEFT_BRACKET: /\(/,
   RIGHT_BRACKET: /\)/,
-  OPERATOR: /[\+\-\*\/\<\>\=\&\|]/,
+  OPERATOR: /[\+\-\*\/\<\>\=\&\|\.]/,
+  AT: /\@/,
   NOT: /\!/,
   LEFT_SECTION_BRACKET: /{/,
   RIGHT_SECTION_BRACKET: /}/,
@@ -29,7 +30,7 @@ export class Lexer {
         this.prevTokens.push([this.buffer, this.bufferType]);
         this.buffer = "";
         this.bufferType = "EMPTY";
-        this.expecting = ["NOT", "NUMBERS", "IDENTIFIER", "LEFT_BRACKET"];
+        this.expecting = ["NOT", "AT", "NUMBERS", "IDENTIFIER", "LEFT_BRACKET"];
       }
       return;
     }
@@ -124,6 +125,7 @@ export class Lexer {
         this.expecting = [
           "NUMBERS",
           "NOT",
+          "AT",
           "IDENTIFIER",
           "LEFT_BRACKET",
           "RIGHT_BRACKET",
@@ -145,12 +147,18 @@ export class Lexer {
         break;
       case "OPERATOR":
         if (this.bufferType === "OPERATOR") {
-          if (token === "=") {
+          if (token === "=" || (token === "-" && this.buffer === "<")) {
             this.buffer += token;
             this.prevTokens.push([this.buffer, this.bufferType]);
             this.buffer = "";
             this.bufferType = "EMPTY";
-            this.expecting = ["NUMBERS", "IDENTIFIER", "LEFT_BRACKET", "NOT"];
+            this.expecting = [
+              "NUMBERS",
+              "IDENTIFIER",
+              "LEFT_BRACKET",
+              "NOT",
+              "AT",
+            ];
           }
         } else {
           this.prevTokens.push([this.buffer, this.bufferType]);
@@ -159,7 +167,13 @@ export class Lexer {
             this.prevTokens.push([token, "OPERATOR"]);
             this.buffer = "";
             this.bufferType = "EMPTY";
-            this.expecting = ["NOT", "NUMBERS", "IDENTIFIER", "LEFT_BRACKET"];
+            this.expecting = [
+              "NOT",
+              "AT",
+              "NUMBERS",
+              "IDENTIFIER",
+              "LEFT_BRACKET",
+            ];
           } else {
             this.buffer = token;
             this.bufferType = "OPERATOR";
@@ -168,6 +182,7 @@ export class Lexer {
               "IDENTIFIER",
               "LEFT_BRACKET",
               "NOT",
+              "AT",
               "OPERATOR",
             ];
           }
@@ -176,6 +191,13 @@ export class Lexer {
       case "NOT":
         this.prevTokens.push([this.buffer, this.bufferType]);
         this.prevTokens.push([token, "NOT"]);
+        this.buffer = "";
+        this.bufferType = "EMPTY";
+        this.expecting = ["NUMBERS", "IDENTIFIER", "LEFT_BRACKET"];
+        break;
+      case "AT":
+        this.prevTokens.push([this.buffer, this.bufferType]);
+        this.prevTokens.push([token, "AT"]);
         this.buffer = "";
         this.bufferType = "EMPTY";
         this.expecting = ["NUMBERS", "IDENTIFIER", "LEFT_BRACKET"];

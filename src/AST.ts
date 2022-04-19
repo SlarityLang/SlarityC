@@ -39,9 +39,9 @@ export class IfStatement implements CodeGeneratable {
     this.else = el;
   }
   genASM(codes: string[]): void {
-    const tagThen = `if_T${codes.length}`;
-    const tagElse = `if_E${codes.length}`;
-    const tagEnd = `if_O${codes.length}`;
+    const tagThen = `IT${codes.length}`;
+    const tagElse = `IE${codes.length}`;
+    const tagEnd = `IO${codes.length}`;
     this.condition.genASM(codes);
     codes.push(`CMP ${this.condition.getResultVarName()} 0`);
     codes.push(`JE ${tagElse}`);
@@ -107,12 +107,10 @@ export class FunctionDefineStatement implements CodeGeneratable {
     this.body = body;
   }
   genASM(codes: string[]): void {
-    codes.push(`func_${this.functionName}:`);
+    codes.push(`F${this.functionName}:`);
     let argi = 1;
     for (let a of this.args) {
-      codes.push(
-        `MOV ${a.getResultVarName()} $${this.functionName}_arg${argi}`
-      );
+      codes.push(`MOV ${a.getResultVarName()} $${this.functionName}_${argi}`);
       argi++;
     }
     this.body.genASM(codes);
@@ -139,8 +137,8 @@ export class WhileLoop implements CodeGeneratable {
     this.body = body;
   }
   genASM(codes: string[]): void {
-    const tagStart = `while_S${codes.length}`;
-    const tagEnd = `while_L${codes.length}`;
+    const tagStart = `WS${codes.length}`;
+    const tagEnd = `WL${codes.length}`;
     codes.push(tagStart + ":");
     this.condition.genASM(codes);
     codes.push(`CMP ${this.condition.getResultVarName()} 0`);
@@ -243,7 +241,7 @@ export class BiVarCalculation implements Evaluable {
     this.right = r;
     this.operator = o;
     this.context = ctx;
-    this.tmpName = `$tmp_${BiVarCalculation.tmpIndex.toString(16)}`;
+    this.tmpName = `%${BiVarCalculation.tmpIndex.toString(16)}`;
     BiVarCalculation.tmpIndex++;
   }
   getClass(ctx: CompileContext): ClassSummary {
@@ -310,9 +308,9 @@ export class BiVarCalculation implements Evaluable {
         break;
       case Operator.GT:
         {
-          const tagT = `eval_${this.tmpName}_T`;
-          const tagF = `eval_${this.tmpName}_F`;
-          const tagE = `eval_${this.tmpName}_E`;
+          const tagT = `E${this.tmpName}T`;
+          const tagF = `E${this.tmpName}F`;
+          const tagE = `E${this.tmpName}E`;
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
@@ -333,9 +331,9 @@ export class BiVarCalculation implements Evaluable {
         break;
       case Operator.LT:
         {
-          const tagT = `eval_${this.tmpName}_T`;
-          const tagF = `eval_${this.tmpName}_F`;
-          const tagE = `eval_${this.tmpName}_E`;
+          const tagT = `E${this.tmpName}T`;
+          const tagF = `E${this.tmpName}F`;
+          const tagE = `E${this.tmpName}E`;
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
@@ -356,9 +354,9 @@ export class BiVarCalculation implements Evaluable {
         break;
       case Operator.EQ:
         {
-          const tagT = `eval_${this.tmpName}_T`;
-          const tagF = `eval_${this.tmpName}_F`;
-          const tagE = `eval_${this.tmpName}_E`;
+          const tagT = `E${this.tmpName}T`;
+          const tagF = `E${this.tmpName}F`;
+          const tagE = `E${this.tmpName}E`;
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
@@ -379,9 +377,9 @@ export class BiVarCalculation implements Evaluable {
         break;
       case Operator.GTE:
         {
-          const tagT = `eval_${this.tmpName}_T`;
-          const tagF = `eval_${this.tmpName}_F`;
-          const tagE = `eval_${this.tmpName}_E`;
+          const tagT = `E${this.tmpName}T`;
+          const tagF = `E${this.tmpName}F`;
+          const tagE = `E${this.tmpName}E`;
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
@@ -402,9 +400,9 @@ export class BiVarCalculation implements Evaluable {
         break;
       case Operator.LTE:
         {
-          const tagT = `eval_${this.tmpName}_T`;
-          const tagF = `eval_${this.tmpName}_F`;
-          const tagE = `eval_${this.tmpName}_E`;
+          const tagT = `E${this.tmpName}T`;
+          const tagF = `E${this.tmpName}F`;
+          const tagE = `E${this.tmpName}E`;
           this.left.genASM(codes);
           codes.push(`MOV ${this.tmpName} ${this.left.getResultVarName()}`);
           if (this.right instanceof ImmediateValue) {
@@ -543,33 +541,31 @@ export class FunctionCall implements Evaluable, Deletable {
     let argi = 1;
     for (let a of this.args) {
       if (a instanceof ImmediateValue) {
-        codes.push(`MOV $${this.functionName}_arg${argi} ${a.getValue()}`);
+        codes.push(`MOV $${this.functionName}_${argi} ${a.getValue()}`);
       } else {
         a.genASM(codes);
-        codes.push(
-          `MOV $${this.functionName}_arg${argi} ${a.getResultVarName()}`
-        );
+        codes.push(`MOV $${this.functionName}_${argi} ${a.getResultVarName()}`);
       }
 
-      codes.push(`PUSH0 $${this.functionName}_arg${argi}`);
+      codes.push(`PUSH0 $${this.functionName}_${argi}`);
       argi++;
     }
     argi--;
     while (argi >= 1) {
-      codes.push(`POP0 $${this.functionName}_arg${argi}`);
+      codes.push(`POP0 $${this.functionName}_${argi}`);
       argi--;
     }
     if (this.isNative) {
       codes.push(`INT native_${this.functionName}`);
     } else {
-      codes.push(`CALL func_${this.functionName}`);
+      codes.push(`CALL F${this.functionName}`);
     }
   }
   genDelASM(codes: string[]): void {
     let argi = 1;
     for (let a of this.args) {
       a.genDelASM(codes);
-      codes.push(`DEL $${this.functionName}_arg${argi}`);
+      codes.push(`DEL $${this.functionName}_${argi}`);
       argi++;
     }
     codes.push(`DEL $${this.functionName}_return`);
@@ -622,13 +618,13 @@ export class ImmediateValue implements Evaluable {
     return this.value;
   }
   genASM(codes: string[]): void {
-    codes.push(`MOV $imm_${this.value} ${this.value}`);
+    codes.push(`MOV @${this.value} ${this.value}`);
   }
   getResultVarName(): string {
-    return `$imm_${this.value}`;
+    return `@${this.value}`;
   }
   genDelASM(codes: string[]): void {
-    codes.push(`DEL $imm_${this.value}`);
+    codes.push(`DEL @${this.value}`);
   }
   getClass(_ctx: CompileContext): ClassSummary {
     return BASE_POINTER;

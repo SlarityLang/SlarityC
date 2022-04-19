@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import fs, { writeFile } from "fs/promises";
 import path from "path";
+import { asm2Bin } from "./Bytecode";
 import { collectClass, dumpClass, summarizeClass } from "./ClassSummary";
 import { mkContext, transformFullClassName } from "./Context";
 import { Lexer } from "./Lex";
@@ -15,19 +16,18 @@ cmd
   .description("Compile Slarity Program (.slarity)")
   .option("-o, --output <output>", "Specify output file name.", "a.slari")
   .option("-v, --verbose", "Enable extra outputs.")
-  .option(
-    "-c, --compile-only",
-    "Only compile, do not link. (Output file name will be ignored) (Override -l)"
-  )
+  .option("-c, --compile-only", "Only compile, do not link. (Ignore -o and -l)")
   .option("-k, --classes <clazz...>", "Class summary files to link.")
   .option("-l, --link <file...>", "Link compiled files.")
   .option(
-    "-S, --share-context",
+    "-s, --share-context",
     "Use the same compile context to compile all files. (Be careful, this can produce MANY BUGS if not used properly!)"
   )
-  .argument("<source...>", "The source Slarit code files.")
+  .option("-b, --bytecode", "Generate bytecode output. ")
+  .argument("<source...>", "The source Slarity code files.")
   .action(async (source, opts) => {
     setDebug(opts.verbose);
+    let outExtension = opts.bytecode ? ".slarib" : ".slari";
     if (!opts.compileOnly) {
       await writeFile(opts.output, "");
     }
@@ -61,7 +61,7 @@ cmd
           let clazz = summarizeClass(code, ctx);
           for (let c of clazz) {
             outs = dumpClass(c[0]);
-            collectClass(outs, ctx); //Self collect
+            collectClass(outs, ctx); // Self collect
             let nn = path.join(
               path.dirname(f),
               transformFullClassName(c[0].identifier, ctx) + ".slaritz"
@@ -69,11 +69,17 @@ cmd
             await fs.writeFile(nn, outs);
             let codes: string[] = [];
             c[1].genASM(codes);
-            let out0 = optimizeAll(codes).join("\n") + "\n";
+            let out0;
+            if (opts.bytecode) {
+              out0 = asm2Bin(codes);
+            } else {
+              out0 = codes.join("\n");
+            }
+            out0 += "\n";
             if (opts.compileOnly) {
               let nn = path.join(
                 path.dirname(f),
-                transformFullClassName(c[0].identifier, ctx) + ".slari"
+                transformFullClassName(c[0].identifier, ctx) + outExtension
               );
               await fs.writeFile(nn, out0);
             } else {
@@ -83,11 +89,17 @@ cmd
         } else {
           code.genASM(codes);
           codes = optimizeAll(codes);
-          outs = codes.join("\n") + "\n";
+          let outs;
+          if (opts.bytecode) {
+            outs = asm2Bin(codes);
+          } else {
+            outs = codes.join("\n");
+          }
+          outs += "\n";
           if (opts.compileOnly) {
             let nn = path.join(
               path.dirname(f),
-              path.basename(f, ".slarity") + ".slari"
+              path.basename(f, ".slarity") + outExtension
             );
             await fs.writeFile(nn, outs);
           } else {
